@@ -1,0 +1,83 @@
+---
+title: "Practical Machine Learning"
+author: "Jean Chrispin DJOMO"
+---
+
+```{r load_lib, echo=FALSE, results='hide', messages=FALSE, warnings=FALSE}
+install.packages("RCurl")
+install.packages("caret")
+install.packages("randomForest")
+library(RCurl)
+library(caret)
+library(randomForest)
+```
+
+## 1- Loading and cleansing the data
+
+Ater exploring the data, found that all the columns having missing data had more than 19200 NA over 19622 rows. With this ration we can considere these variable non-useful for our analyses hence we eliminated them.For the other few missing data, we replaced them with zeros.
+We also convert everythig to numeric and factor for the outcome since the PCA preprocessing works with numerics.
+
+```{r load_data, echo=FALSE, results='hide'}
+url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+x <- getURL(url)
+dataOrig <- read.csv(textConnection(x))
+t <- sapply(dataOrig, function(x) sum(length(which(is.na(x)))))
+t <- as.vector(which(t != 0, arr.ind=T))
+dataOrig <- dataOrig[,-t]
+dataOrig <- cbind(sapply(dataOrig[,!names(dataOrig) %in% c("classe")], as.numeric), data.frame(dataOrig$classe))
+names(dataOrig)[length(names(dataOrig))] <- c("classe")
+url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+x <- getURL(url)
+toPredict <- read.csv(textConnection(x))
+toPredict <- toPredict[,-t]
+toPredict <- cbind(sapply(toPredict[,!names(toPredict) %in% c("problem_id")], as.numeric), data.frame(toPredict$problem_id))
+names(toPredict)[length(names(toPredict))] <- c("problem_id")
+rm(x,url)
+```
+
+## 2- Prepocessing data
+
+```{r rm_NA, echo=FALSE, results='markup'}
+j <- ncol(dataOrig)-1
+for (i in 1:j) dataOrig[,i][is.na(dataOrig[,i])] <- mean(dataOrig[,i],na.rm=TRUE)
+j <- ncol(toPredict)-1
+for (i in 1:j) toPredict[,i][is.na(toPredict[,i])] <- 0
+rm(i,j)
+```
+
+## 2-1 Assess features' correlations
+
+To obtain an efficient model, we are looking of using fewer variables that are uncorrelated and explain as much vairance as possible. we consider correlated features with correlation greater than 0.9 (correlation between the same feature is excluded since by definition it is 1).
+
+```{r correl_data, echo=FALSE, results='markup'}
+corrM <- abs(cor(dataOrig[,!names(dataOrig) %in% c("classe")]))
+diag(corrM) <- 0
+```
+
+There are `r dim(which(corrM > 0.9, arr.ind=T))[1]` pairs of distinct variables that are correlated relative to our standard (> 0.9).
+
+## 2-2 Cross validation of the original data
+
+Since we choose to use K-fold for cross validation, we will use 80% of the data as training set and 20% as testing set. With the size of the training set, k=10 is good for our cross validation algorithm.
+
+```{r cross_valid, echo=FALSE, results='markup'}
+set.seed(1500)
+inTrain <- createDataPartition(y=dataOrig$classe, p=0.75, list=FALSE)
+training <- dataOrig[inTrain,]
+testing <- dataOrig[-inTrain,]
+rm(inTrain)
+fitControl <- trainControl(method="cv", number=10)
+```
+
+## 3-3 generate the preiction model(PCA preprocessing will be used for cross validation of the data.
+
+With presence of highly correlated variables, we preprocess the data to get uncorrelated variables that explain the original data. To achieve this, we use PCA which convert a set of observations of possibly correlated variables into a set of values of linearlyuncorrelated variables called principal components. This components will be use as our final predictors. Befcause of the nomber of factors of our outcome (5), we chose to use random forest algorithm.
+This is the summary of the out of sample errors we expect for this model:
+
+```{r prePCA, echo=FALSE, results='markup'}
+set.seed(1501)
+modelFit <- train(classe ~ ., method="rf", data=training, trControl=fitControl, preProcess="pca")
+modelFit <- readRDS("C:/Users/Chrispin/DataScience/Machine Learning/FinalModel")
+confusionMatrix(testing$classe,predict(modelFit,testing))
+```
+
